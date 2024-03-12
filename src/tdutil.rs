@@ -17,23 +17,24 @@ impl Camera {
         }
     }
 
-    pub fn point_to_ss (self, point: Point) -> rect::Point {
-        rect::Point::new((  point.x / 1.0 ) as i32 + self.res.x / 2,
+    pub fn point_to_ss (self, point: &Point) -> rect::Point {
+        rect::Point::new( ( point.x / 1.0 ) as i32 + self.res.x / 2,
                          ( point.y / 1.0 ) as i32 + self.res.y / 2)
     }
 
-    pub fn tri_to_ss (self, tri: Tri) -> [rect::Point; 3] {
+    pub fn tri_to_ss (self, tri: &Tri) -> [rect::Point; 3] {
         let mut out: [rect::Point; 3] = [rect::Point::new(0,0); 3];
-        out[0] = tri.a.project(self);
-        out[1] = tri.b.project(self);
-        out[2] = tri.c.project(self);
+        out[0] = self.point_to_ss(&tri.a);
+        out[1] = self.point_to_ss(&tri.b);
+        out[2] = self.point_to_ss(&tri.c);
         out
     }
 
     pub fn render<T: RenderTarget> (self, canvas: &mut sdl2::render::Canvas<T>, geometry: &Vec<Geometry>) {
         for g in geometry.iter() {
-            for t in g.tris.iter() {
-                let p = self.tri_to_ss(**t);
+            let tris = g.apply_transform();
+            for t in tris.iter() {
+                let p = self.tri_to_ss(t);
                 canvas.draw_line(p[0], p[1]);
                 canvas.draw_line(p[1], p[2]);
                 canvas.draw_line(p[2], p[0]);
@@ -43,39 +44,127 @@ impl Camera {
 }
 
 #[derive(Clone)]
-pub struct Geometry<'a> {
-    pub pos: Point,
-    pub tris: Vec<&'a Tri>,
+pub struct Geometry {
+    pub tris: Vec<Tri>,
+    pub transformation: Transformation,
 }
 
-impl<'a> Geometry<'a> {
-    pub fn new (pos: Point) -> Geometry<'a> {
+impl Geometry {
+    pub fn new () -> Geometry {
         Self {
-            pos,
             tris: Vec::new(),
+            transformation: Transformation::new(),
         }
     }
 
-    // pub fn rot_x (&mut self, a: f32) {
-    //     for t in self.tris.iter() {
-    //         t.rot_x(a);
-    //     }
-    // }
+    pub fn apply_transform (&self) -> Vec<Tri> {
+        let mut out = self.tris.clone();
+        
+        for tri in out.iter_mut() {
+            tri.a = self.transformation.apply_to_point(&tri.a);
+            tri.b = self.transformation.apply_to_point(&tri.b);
+            tri.c = self.transformation.apply_to_point(&tri.c);
+        }
 
-    // pub fn rot_y (&mut self, a: f32) {
-    //     for t in self.tris.iter() {
-    //         t.rot_y(a);
-    //     }
-    // }
+        out
+    }
 
-    // pub fn rot_z (&mut self, a: f32) {
-    //     for t in self.tris.iter() {
-    //         t.rot_z(a);
-    //     }
-    // } 
-
-    pub fn add_tri (&mut self, tri: &'a Tri) {
+    pub fn add_tri (&mut self, tri: Tri) {
         self.tris.push(tri);
+    }
+
+    pub fn add_tris (&mut self, tri: Vec<Tri>) {
+        for t in tri.iter() {
+            self.tris.push(*t);
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Transformation {
+    pub mat: Matrix
+}
+
+impl Transformation {
+    pub fn new () -> Self {
+        Self {
+            mat: arr([
+                [1.,0.,0.,0.],
+                [0.,1.,0.,0.],
+                [0.,0.,1.,0.],
+                [0.,0.,0.,1.]
+                ])
+        }
+    }
+
+    pub fn translate (&mut self, v: Point) {
+        let delta = arr([
+            [0.,0.,0.,v.x],
+            [0.,0.,0.,v.y],
+            [0.,0.,0.,v.z],
+            [0.,0.,0.,0.]
+        ]);
+
+        self.mat = self.mat.add(&delta);
+    }
+
+    pub fn rot_x (&mut self, a: f32) {
+        let c = a.cos();
+        let s = a.sin();
+
+        let delta = arr([
+            [1.,0.,0.,0.],
+            [0.,c,-s,0.],
+            [0.,s,c,0.],
+            [0.,0.,0.,1.]
+        ]);
+
+        self.mat = self.mat.dot(&delta);
+    }
+
+    pub fn rot_y (&mut self, a: f32) {
+        let c = a.cos();
+        let s = a.sin();
+
+        let delta = arr([
+            [c,0.,s,0.],
+            [0.,1.,0.,0.],
+            [-s,0.,c,0.],
+            [0.,0.,0.,1.]
+        ]);
+
+        self.mat = self.mat.dot(&delta);
+    }
+
+    pub fn rot_z (&mut self, a: f32) {
+        let c = a.cos();
+        let s = a.sin();
+
+        let delta = arr([
+            [c,-s,0.,0.],
+            [s,c,0.,0.],
+            [0.,0.,1.,0.],
+            [0.,0.,0.,1.]
+        ]);
+
+        self.mat = self.mat.dot(&delta);
+    }
+
+    pub fn set_pos (&mut self, v: Point) {
+        
+
+        self.mat.set(&vec![3,0], v.x);
+        self.mat.set(&vec![3,1], v.y);
+        self.mat.set(&vec![3,2], v.z);
+    }
+
+    pub fn apply_to_point (&self, p: &Point) -> Point {
+        let p = arr([[p.x, p.y, p.z, 1.]]).transpose();
+
+        let out = self.mat.dot(&p);
+        let out = Point::new(out.get(&vec![0,0]), out.get(&vec![0,1]), out.get(&vec![0,2]));
+
+        out
     }
 }
 
@@ -89,32 +178,6 @@ pub struct Tri {
 impl Tri {
     pub fn new (a: Point, b: Point, c: Point) -> Self {
         Self { a, b, c, }
-    }
-
-    pub fn rot_x (&mut self, a: f32) {
-        self.a.rot_x(a);
-        self.b.rot_x(a);
-        self.c.rot_x(a);
-    }
-
-    pub fn rot_y (&mut self, a: f32) {
-        self.a.rot_y(a);
-        self.b.rot_y(a);
-        self.c.rot_y(a);
-    }
-
-    pub fn rot_z (&mut self, a: f32) {
-        self.a.rot_z(a);
-        self.b.rot_z(a);
-        self.c.rot_z(a);
-    }
-
-    pub fn project (self, camera: Camera) -> [rect::Point; 3] {
-        let mut out: [rect::Point; 3] = [rect::Point::new(0,0); 3];
-        out[0] = self.a.project(camera);
-        out[1] = self.b.project(camera);
-        out[2] = self.c.project(camera);
-        out
     }
 }
 
@@ -134,46 +197,17 @@ impl Point {
         }
     }
 
-    pub fn project (self, camera: Camera) -> rect::Point {
-        rect::Point::new((  self.x / 1.0 ) as i32 + camera.res.x / 2,
-                         ( self.y / 1.0 ) as i32 + camera.res.y / 2)
-    }
+    // pub fn rot_x (&mut self, a: f32) {
+    //     let mut axis = arr(&[[self.y, self.z]]);
+    //     let c = a.cos();
+    //     let s = a.sin();
+    //     let mat = arr(&[[c, -s],
+    //                             [s,  c]]);
+    //     axis = axis.dot(&mat);
 
-    pub fn rot_x (&mut self, a: f32) {
-        let mut axis = arr(&[[self.y, self.z]]);
-        let c = a.cos();
-        let s = a.sin();
-        let mat = arr(&[[c, -s],
-                                [s,  c]]);
-        axis = axis.dot(&mat);
-
-        self.y = axis.get(vec![0,0]);
-        self.z = axis.get(vec![1,0]);
-    }
-
-    pub fn rot_y (&mut self, a: f32) {
-        let mut axis = arr(&[[self.x, self.z]]);
-        let c = a.cos();
-        let s = a.sin();
-        let mat = arr(&[[c, -s],
-                                [s,  c]]);
-        axis = axis.dot(&mat);
-
-        self.x = axis.get(vec![0,0]);
-        self.z = axis.get(vec![1,0]);
-    }
-
-    pub fn rot_z (&mut self, a: f32) {
-        let mut axis = arr(&[[self.y, self.x]]);
-        let c = a.cos();
-        let s = a.sin();
-        let mat = arr(&[[c, -s],
-                                [s,  c]]);
-        axis = axis.dot(&mat);
-
-        self.y = axis.get(vec![0,0]);
-        self.x = axis.get(vec![1,0]);
-    }
+    //     self.y = axis.get(&vec![0,0]);
+    //     self.z = axis.get(&vec![1,0]);
+    // }
 
     pub fn length (self) -> f32 {
         (self.x*self.x + self.y*self.y + self.z*self.z).sqrt()
@@ -285,11 +319,15 @@ impl std::ops::Div for Point {
     }
 }
 
+
+// TODO: Potential Optimization here: Use static size arrays, 4x4 and 1x4
+
 #[derive(Clone, Debug)]
 pub struct Matrix {
     values: Vec<Vec<f32>>,
     size: Vec<usize>,
 }
+
 impl Matrix {
     pub fn new(size: Vec<usize>) -> Self {
         let x: usize = match size.get(0) {
@@ -307,7 +345,7 @@ impl Matrix {
             size: size.clone(),
         }
     }
-    pub fn from_arr<Mat: AsRef<[Row]>, Row: AsRef<[f32]>>(arr: &Mat) -> Self {
+    pub fn from_arr<Mat: AsRef<[Row]>, Row: AsRef<[f32]>>(arr: Mat) -> Self {
         let s0: usize = arr.as_ref().len();
         let s1: usize = arr.as_ref()[0].as_ref().len();
       
@@ -333,37 +371,43 @@ impl Matrix {
         
         for x in 0..size[0] {
             for y in 0..size[1] {
-               m.set(vec![x,y], func(vec![x,y]));
+               m.set(&vec![x,y], func(vec![x,y]));
             }
         }
 
         m
     }
 
-    pub fn get(&self, p: Vec<usize>) -> f32 {
+    pub fn get(&self, p: &Vec<usize>) -> f32 {
         self.values[p[1]][p[0]]
     }
 
-    pub fn set(&mut self, p: Vec<usize>, v: f32) {
+    pub fn set(&mut self, p: &Vec<usize>, v: f32) {
         self.values[p[1]][p[0]] = v;
     }
 
+    pub fn add (&self, other: &Matrix) -> Self {
+        assert_eq!(self.size, other.size);
+        
+        let out = Matrix::from_fn(self.size.clone(), |c| self.get(&c)+other.get(&c));
+
+        out
+    }
+
     pub fn transpose (self) -> Self {
-      Matrix::from_fn(vec![self.size[1], self.size[0]], |p| self.get(vec![p[1], p[0]]))
+      Matrix::from_fn(vec![self.size[1], self.size[0]], |p| self.get(&vec![p[1], p[0]]))
     }
 
     pub fn dot(&self, other: &Self) -> Self {
-        // assert_eq!(self.size[1], other.size[0]);
-
         let mut out = Matrix::new(vec![other.size[0], self.size[1]]);
 
         for y1 in 0..self.size[1] {
             for x2 in 0..other.size[0] {
                 let mut sum: f32 = 0.0;
                 for x1 in 0..self.size[0] {
-                    sum += self.get(vec![x1, y1]) * other.get(vec![x2, x1]);
+                    sum += self.get(&vec![x1, y1]) * other.get(&vec![x2, x1]);
                 }
-                out.set(vec![x2, y1], sum);
+                out.set(&vec![x2, y1], sum);
             }
         }
 
@@ -378,7 +422,7 @@ impl ToString for Matrix {
 
         for y in 0..self.size[1] {
             for x in 0..self.size[0] {
-                out.push_str(self.get(vec![x, y]).to_string().as_str());
+                out.push_str(self.get(&vec![x, y]).to_string().as_str());
                 out.push_str("\t\t");
             }
             out.push('\n');
@@ -388,6 +432,6 @@ impl ToString for Matrix {
     }
 }
 
-pub fn arr<Mat: AsRef<[Row]>, Row: AsRef<[f32]>>(a: &Mat) -> Matrix {
+pub fn arr<Mat: AsRef<[Row]>, Row: AsRef<[f32]>>(a: Mat) -> Matrix {
     Matrix::from_arr(a)
 }
