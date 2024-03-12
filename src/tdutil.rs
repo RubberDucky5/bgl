@@ -3,26 +3,52 @@
 extern crate sdl2;
 use sdl2::{rect, render::RenderTarget};
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct Camera {
     pub pos: Point,
     pub res: rect::Point,
-    pub fov: i32,
+    pub fov: f32,
+    pub near: f32,
+    pub far: f32,
+    proj_mat: Matrix,
 }
 
 impl Camera {
-    pub fn new (pos: Point, res: rect::Point, fov: i32) -> Self {
-        Self {
-            pos, res, fov,
-        }
+    pub fn new (pos: Point, res: rect::Point, fov: f32) -> Self {
+        let mut out = Self {
+            pos, res, fov, near: 0.1, far: 1000.0, proj_mat: Matrix::new(vec![4,4])
+        };
+
+        out.calculate_projection_matrix();
+
+        out
     }
 
-    pub fn point_to_ss (self, point: &Point) -> rect::Point {
-        rect::Point::new( ( point.x / 1.0 ) as i32 + self.res.x / 2,
-                         ( point.y / 1.0 ) as i32 + self.res.y / 2)
+    fn calculate_projection_matrix (&mut self) {
+        let ar: f32 = (self.res.x / self.res.y) as f32;
+        let vfov = (self.fov/2.).tan();
+
+        self.proj_mat = arr([
+            [1./(ar*vfov), 0., 0., 0.],
+            [0., 1./vfov, 0., 0.],
+            [0., 0., (-self.near-self.far)/(self.near-self.far), (2. * self.far * self.near)/(self.near-self.far)],
+            [0., 0., 1., 0.]
+        ]);
     }
 
-    pub fn tri_to_ss (self, tri: &Tri) -> [rect::Point; 3] {
+    pub fn point_to_ss (&self, point: &Point) -> rect::Point {
+        // rect::Point::new( ( point.x / 1.0 ) as i32 + self.res.x / 2,
+        //                  ( point.y / 1.0 ) as i32 + self.res.y / 2)
+        let out = self.proj_mat.dot(&arr([[point.x, point.y, point.z, 1.]]).transpose());
+        let out = rect::Point::new(
+                (((out.get(&vec![0,0]) / out.get(&vec![0,3]) + 1.) / 2.) * self.res.y as f32) as i32,
+                (((out.get(&vec![0,1]) / out.get(&vec![0,3]) + 1.) / 2.) * self.res.y as f32) as i32
+        );
+
+        out
+    }
+
+    pub fn tri_to_ss (&self, tri: &Tri) -> [rect::Point; 3] {
         let mut out: [rect::Point; 3] = [rect::Point::new(0,0); 3];
         out[0] = self.point_to_ss(&tri.a);
         out[1] = self.point_to_ss(&tri.b);
@@ -30,7 +56,7 @@ impl Camera {
         out
     }
 
-    pub fn render<T: RenderTarget> (self, canvas: &mut sdl2::render::Canvas<T>, geometry: &Vec<Geometry>) {
+    pub fn render<T: RenderTarget> (&self, canvas: &mut sdl2::render::Canvas<T>, geometry: &Vec<Geometry>) {
         for g in geometry.iter() {
             let tris = g.apply_transform();
             for t in tris.iter() {
@@ -46,14 +72,14 @@ impl Camera {
 #[derive(Clone)]
 pub struct Geometry {
     pub tris: Vec<Tri>,
-    pub transformation: Transformation,
+    pub transform: Transform,
 }
 
 impl Geometry {
     pub fn new () -> Geometry {
         Self {
             tris: Vec::new(),
-            transformation: Transformation::new(),
+            transform: Transform::new(),
         }
     }
 
@@ -61,9 +87,9 @@ impl Geometry {
         let mut out = self.tris.clone();
         
         for tri in out.iter_mut() {
-            tri.a = self.transformation.apply_to_point(&tri.a);
-            tri.b = self.transformation.apply_to_point(&tri.b);
-            tri.c = self.transformation.apply_to_point(&tri.c);
+            tri.a = self.transform.apply_to_point(&tri.a);
+            tri.b = self.transform.apply_to_point(&tri.b);
+            tri.c = self.transform.apply_to_point(&tri.c);
         }
 
         out
@@ -81,11 +107,11 @@ impl Geometry {
 }
 
 #[derive(Clone)]
-pub struct Transformation {
+pub struct Transform {
     pub mat: Matrix
 }
 
-impl Transformation {
+impl Transform {
     pub fn new () -> Self {
         Self {
             mat: arr([

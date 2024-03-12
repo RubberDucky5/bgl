@@ -49,9 +49,11 @@ fn main() {
 
     geo.add_tris(tris);
 
+    geo.transform.translate(Point::new(0.,0.,1000.));
+
     let mut geo = vec![geo];
 
-    let camera = Camera::new(Point::new(0., 0., 0.), rect::Point::new(800, 600), 90);
+    let camera = Camera::new(Point::new(0., 0., 0.), rect::Point::new(800, 600), 70.0);
 
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -69,9 +71,9 @@ fn main() {
         canvas.set_draw_color(Color::RGB(0, 0, 0));
 
         // geo.get_mut(0).unwrap().transformation.set_pos(Point::new(((frameCount as f32) / 100.).sin() * 100., 0., 0.));
-        geo.get_mut(0).unwrap().transformation.rot_z(0.02);
-        geo.get_mut(0).unwrap().transformation.rot_y(0.01);
-        geo.get_mut(0).unwrap().transformation.rot_x(0.005);
+        geo.get_mut(0).unwrap().transform.rot_z(0.02);
+        geo.get_mut(0).unwrap().transform.rot_y(0.01);
+        geo.get_mut(0).unwrap().transform.rot_x(0.005);
 
 
         camera.render(&mut canvas, &geo);
