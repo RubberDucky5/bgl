@@ -7,6 +7,8 @@ use std::time::Duration;
 
 fn main() {
 
+    let mut _frameCount: f32 = 0.0;
+
     let sdl_context = sdl2::init().unwrap();
     let video_sys = sdl_context.video().unwrap();
 
@@ -52,7 +54,7 @@ fn main() {
 
     let mut geo = vec![geo];
 
-    let camera = Camera::new(Vec3::new(0., 0., 0.), rect::Point::new(800, 600), 70.0);
+    let mut camera = Camera::new( rect::Point::new(800, 600), 70.0);
 
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -64,6 +66,10 @@ fn main() {
                 _ => {}
             }
         }
+
+        geo.get_mut(0).unwrap().transform.set_pos(Vec3::new(0.,(_frameCount / 10.).sin() * 100., 1000.));
+
+
         canvas.set_draw_color(Color::RGB(255, 255, 255));
         canvas.clear();
         
@@ -78,6 +84,8 @@ fn main() {
 
         canvas.present();
         std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+
+        _frameCount+=1.0;
     }
 
     // println!("{:?}", geo.get_mut(0).unwrap().transformation.zr);

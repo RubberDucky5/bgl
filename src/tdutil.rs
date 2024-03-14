@@ -14,7 +14,7 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new (pos: Vec3, res: rect::Point, fov: f32) -> Self {
+    pub fn new (res: rect::Point, fov: f32) -> Self {
         let mut out = Self {
             res,
             fov,
@@ -63,6 +63,8 @@ impl Camera {
         let look_dir = Vec3::new(0.,0.,1.);
         let look_dir = self.transform.apply_to_vector(&look_dir);
         for g in geometry.iter() {
+            let mut g = g.clone();
+            g.transform.mat = g.transform.mat.dot(&self.transform.get_inverse().mat);
             let tris = g.apply_transform();
             for t in tris.iter() {
                 if t.should_backface_cull(look_dir) {
@@ -197,6 +199,15 @@ impl Transform {
 
         let out = self.mat.dot(&p);
         let out = Vec3::new(out.get(&vec![0,0]), out.get(&vec![0,1]), out.get(&vec![0,2]));
+
+        out
+    }
+
+    pub fn get_inverse (&self) -> Transform {
+        let mat = self.mat.inverse().unwrap();
+        
+        let mut out = Transform::new();
+        out.mat = mat;
 
         out
     }
@@ -471,6 +482,67 @@ impl Matrix {
         }
 
         out
+    }
+
+    //Chat GPT Wrote this:
+    pub fn inverse(&self) -> Option<Self> {
+        // Check if the matrix is square
+        if self.size.len() != 2 || self.size[0] != self.size[1] {
+            return None; // Not a square matrix, inverse does not exist
+        }
+
+        let n = self.size[0];
+        let mut augmented_matrix = self.clone();
+
+        // Augment the matrix with an identity matrix of the same size
+        for i in 0..n {
+            for j in 0..n {
+                augmented_matrix.values[i].push(if i == j { 1.0 } else { 0.0 });
+            }
+        }
+
+        // Perform Gauss-Jordan elimination
+        for i in 0..n {
+            // Find pivot row
+            let mut pivot_row = i;
+            for j in i + 1..n {
+                if augmented_matrix.values[j][i].abs() > augmented_matrix.values[pivot_row][i].abs() {
+                    pivot_row = j;
+                }
+            }
+            if augmented_matrix.values[pivot_row][i] == 0.0 {
+                return None; // Matrix is singular, inverse does not exist
+            }
+
+            // Swap pivot row with current row
+            augmented_matrix.values.swap(i, pivot_row);
+
+            // Scale pivot row to have a leading 1
+            let pivot = augmented_matrix.values[i][i];
+            for j in 0..2 * n {
+                augmented_matrix.values[i][j] /= pivot;
+            }
+
+            // Eliminate other rows
+            for j in 0..n {
+                if j != i {
+                    let factor = augmented_matrix.values[j][i];
+                    for k in 0..2 * n {
+                        augmented_matrix.values[j][k] -= factor * augmented_matrix.values[i][k];
+                    }
+                }
+            }
+        }
+
+        // Extract the inverse matrix
+        let mut inverse_matrix = Matrix::new(vec![n, n]);
+        for i in 0..n {
+            for j in 0..n {
+                inverse_matrix.values[i][j] = augmented_matrix.values[i][j + n];
+            }
+        }
+
+        Some(inverse_matrix)
     }
 }
 
