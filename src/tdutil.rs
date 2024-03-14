@@ -5,18 +5,23 @@ use sdl2::{rect, render::RenderTarget};
 
 #[derive(Clone)]
 pub struct Camera {
-    pub pos: Point,
     pub res: rect::Point,
     pub fov: f32,
     pub near: f32,
     pub far: f32,
     proj_mat: Matrix,
+    pub transform: Transform,
 }
 
 impl Camera {
-    pub fn new (pos: Point, res: rect::Point, fov: f32) -> Self {
+    pub fn new (pos: Vec3, res: rect::Point, fov: f32) -> Self {
         let mut out = Self {
-            pos, res, fov, near: 0.1, far: 1000.0, proj_mat: Matrix::new(vec![4,4])
+            res,
+            fov,
+            near: 0.1,
+            far: 1000.0,
+            proj_mat: Matrix::new(vec![4,4]),
+            transform: Transform::new(),
         };
 
         out.calculate_projection_matrix();
@@ -36,9 +41,7 @@ impl Camera {
         ]);
     }
 
-    pub fn point_to_ss (&self, point: &Point) -> rect::Point {
-        // rect::Point::new( ( point.x / 1.0 ) as i32 + self.res.x / 2,
-        //                  ( point.y / 1.0 ) as i32 + self.res.y / 2)
+    pub fn point_to_ss (&self, point: &Vec3) -> rect::Point {
         let out = self.proj_mat.dot(&arr([[point.x, point.y, point.z, 1.]]).transpose());
         let out = rect::Point::new(
                 (((out.get(&vec![0,0]) / out.get(&vec![0,3]) + 1.) / 2.) * self.res.y as f32) as i32,
@@ -57,13 +60,18 @@ impl Camera {
     }
 
     pub fn render<T: RenderTarget> (&self, canvas: &mut sdl2::render::Canvas<T>, geometry: &Vec<Geometry>) {
+        let look_dir = Vec3::new(0.,0.,1.);
+        let look_dir = self.transform.apply_to_vector(&look_dir);
         for g in geometry.iter() {
             let tris = g.apply_transform();
             for t in tris.iter() {
+                if t.should_backface_cull(look_dir) {
+                    continue;
+                }
                 let p = self.tri_to_ss(t);
-                canvas.draw_line(p[0], p[1]);
-                canvas.draw_line(p[1], p[2]);
-                canvas.draw_line(p[2], p[0]);
+                let _ = (canvas.draw_line(p[0], p[1]),
+                canvas.draw_line(p[1], p[2]),
+                canvas.draw_line(p[2], p[0]));
             }
         }
     }
@@ -87,9 +95,9 @@ impl Geometry {
         let mut out = self.tris.clone();
         
         for tri in out.iter_mut() {
-            tri.a = self.transform.apply_to_point(&tri.a);
-            tri.b = self.transform.apply_to_point(&tri.b);
-            tri.c = self.transform.apply_to_point(&tri.c);
+            tri.a = self.transform.apply_to_vector(&tri.a);
+            tri.b = self.transform.apply_to_vector(&tri.b);
+            tri.c = self.transform.apply_to_vector(&tri.c);
         }
 
         out
@@ -123,7 +131,7 @@ impl Transform {
         }
     }
 
-    pub fn translate (&mut self, v: Point) {
+    pub fn translate (&mut self, v: Vec3) {
         let delta = arr([
             [0.,0.,0.,v.x],
             [0.,0.,0.,v.y],
@@ -176,7 +184,7 @@ impl Transform {
         self.mat = self.mat.dot(&delta);
     }
 
-    pub fn set_pos (&mut self, v: Point) {
+    pub fn set_pos (&mut self, v: Vec3) {
         
 
         self.mat.set(&vec![3,0], v.x);
@@ -184,11 +192,11 @@ impl Transform {
         self.mat.set(&vec![3,2], v.z);
     }
 
-    pub fn apply_to_point (&self, p: &Point) -> Point {
+    pub fn apply_to_vector (&self, p: &Vec3) -> Vec3 {
         let p = arr([[p.x, p.y, p.z, 1.]]).transpose();
 
         let out = self.mat.dot(&p);
-        let out = Point::new(out.get(&vec![0,0]), out.get(&vec![0,1]), out.get(&vec![0,2]));
+        let out = Vec3::new(out.get(&vec![0,0]), out.get(&vec![0,1]), out.get(&vec![0,2]));
 
         out
     }
@@ -196,25 +204,36 @@ impl Transform {
 
 #[derive(Copy, Clone)]
 pub struct Tri {
-    pub a: Point,
-    pub b: Point,
-    pub c: Point,
+    pub a: Vec3,
+    pub b: Vec3,
+    pub c: Vec3,
 }
 
 impl Tri {
-    pub fn new (a: Point, b: Point, c: Point) -> Self {
+    pub fn new (a: Vec3, b: Vec3, c: Vec3) -> Self {
         Self { a, b, c, }
+    }
+
+    pub fn get_normal (&self) -> Vec3 {
+        let a = self.a - self.b;
+        let b = self.c - self.b;
+
+        a.cross(&b).normalize()
+    }
+
+    pub fn should_backface_cull (&self, vec: Vec3) -> bool {
+        self.get_normal().dot(vec) < 0.1 // Why is this 0.1 and not 0???????????????
     }
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct Point {
+pub struct Vec3 {
     pub x : f32,
     pub y : f32,
     pub z : f32,
 }
 
-impl Point {
+impl Vec3 {
     pub fn new (x : f32, y : f32, z : f32) -> Self {
         Self {
             x,
@@ -223,17 +242,13 @@ impl Point {
         }
     }
 
-    // pub fn rot_x (&mut self, a: f32) {
-    //     let mut axis = arr(&[[self.y, self.z]]);
-    //     let c = a.cos();
-    //     let s = a.sin();
-    //     let mat = arr(&[[c, -s],
-    //                             [s,  c]]);
-    //     axis = axis.dot(&mat);
-
-    //     self.y = axis.get(&vec![0,0]);
-    //     self.z = axis.get(&vec![1,0]);
-    // }
+    pub fn zero () -> Self {
+        Self {
+            x: 0.,
+            y: 0.,
+            z: 0.,
+        }
+    }
 
     pub fn length (self) -> f32 {
         (self.x*self.x + self.y*self.y + self.z*self.z).sqrt()
@@ -241,6 +256,14 @@ impl Point {
 
     pub fn dot (self, other: Self) -> f32 {
         self.x*other.x + self.y*other.y + self.z*other.z
+    }
+
+    pub fn cross (&self, other: &Self) -> Self{
+        Vec3::new(
+            self.y*other.z - self.z*other.y,
+            self.z*other.x - self.x*other.z,
+            self.x*other.y - self.y*other.x
+        )
     }
 
     pub fn add (mut self, other: Self) -> Self {
@@ -286,9 +309,19 @@ impl Point {
             z: self.z,
         }
     }
+
+    pub fn normalize (&mut self) -> Self {
+        let l = self.length();
+
+        self.x /= l;
+        self.y /= l;
+        self.z /= l;
+
+        *self
+    }
 }
 
-impl ToString for Point {
+impl ToString for Vec3 {
     fn to_string (&self) -> String {
         let mut out = String::from("( ");
         out.push_str(self.x.to_string().as_str());
@@ -301,7 +334,7 @@ impl ToString for Point {
     } 
 }
 
-impl std::ops::Add for Point {
+impl std::ops::Add for Vec3 {
     type Output = Self;
     fn add(self, other: Self) -> Self {
         Self {
@@ -312,7 +345,7 @@ impl std::ops::Add for Point {
     }
 }
 
-impl std::ops::Sub for Point {
+impl std::ops::Sub for Vec3 {
     type Output = Self;
     fn sub(self, other: Self) -> Self {
         Self {
@@ -323,7 +356,7 @@ impl std::ops::Sub for Point {
     }
 }
 
-impl std::ops::Mul for Point {
+impl std::ops::Mul for Vec3 {
     type Output = Self;
     fn mul(self, other: Self) -> Self {
         Self {
@@ -334,7 +367,7 @@ impl std::ops::Mul for Point {
     }
 }
 
-impl std::ops::Div for Point {
+impl std::ops::Div for Vec3 {
     type Output = Self;
     fn div(self, other: Self) -> Self {
         Self {
